@@ -1,1 +1,4 @@
 data/**
+lib/__pycache__/**
+checkpoints/**
+CLAUDE.md

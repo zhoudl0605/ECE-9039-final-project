@@ -1,0 +1,53 @@
+{
+  "episode_rewards": [
+    0.0,
+    351.73691599013927,
+    0.017872904119940358,
+    -0.06553171566883975,
+    1.494670123488124
+  ],
+  "episode_steps": [
+    100,
+    100,
+    100,
+    100,
+    100
+  ],
+  "total_episodes": 5,
+  "total_steps": 500,
+  "config": {
+    "state_dim": 4,
+    "action_dim": 4,
+    "action_low": [
+      1.0,
+      1.0,
+      5.0,
+      1.0
+    ],
+    "action_high": [
+      20.0,
+      30.0,
+      10.0,
+      20.0
+    ],
+    "lr_actor": 0.0003,
+    "lr_critic": 0.0003,
+    "lr_alpha": 0.0003,
+    "gamma": 0.99,
+    "tau": 0.005,
+    "alpha": 0.2,
+    "automatic_entropy_tuning": true,
+    "batch_size": 128,
+    "replay_buffer_size": 10000,
+    "num_episodes": 5,
+    "start_steps": 1000,
+    "update_interval": 1,
+    "eval_interval": 10,
+    "save_interval": 50,
+    "step_interval_ns": 1000000000,
+    "max_steps_per_episode": 720,
+    "use_data_slices": true,
+    "hours_per_slice": 2,
+    "slices_per_episode": 1
+  }
+}

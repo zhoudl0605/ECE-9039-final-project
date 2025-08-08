@@ -1,0 +1,65 @@
+{
+  "episode_rewards": [
+    103.55931440902862,
+    1.2212839987257382,
+    151.42154743525464,
+    -43.58537313823527,
+    -48.188126569666935,
+    -644.3703068522888,
+    1.7720601116563905,
+    -695.1286896322446,
+    1.3787804489006845,
+    -41.793281439727366
+  ],
+  "episode_steps": [
+    1000,
+    1000,
+    1000,
+    1000,
+    1000,
+    368,
+    1000,
+    287,
+    1000,
+    1000
+  ],
+  "total_episodes": 10,
+  "total_steps": 8655,
+  "best_reward": 151.42154743525464,
+  "config": {
+    "state_dim": 4,
+    "action_dim": 4,
+    "action_low": [
+      1.0,
+      1.0,
+      5.0,
+      1.0
+    ],
+    "action_high": [
+      20.0,
+      30.0,
+      10.0,
+      20.0
+    ],
+    "lr_actor": 0.0003,
+    "lr_critic": 0.0003,
+    "lr_alpha": 0.0003,
+    "gamma": 0.99,
+    "tau": 0.005,
+    "alpha": 0.2,
+    "automatic_entropy_tuning": true,
+    "batch_size": 256,
+    "replay_buffer_size": 50000,
+    "num_episodes": 10,
+    "start_steps": 5000,
+    "update_interval": 1,
+    "eval_interval": 50,
+    "save_interval": 100,
+    "step_interval_ns": 1000000000,
+    "max_steps_per_episode": 1000,
+    "use_data_slices": true,
+    "hours_per_slice": 2,
+    "slices_per_episode": 1,
+    "data_sample_rate": 0.2
+  }
+}

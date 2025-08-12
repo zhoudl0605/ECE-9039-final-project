@@ -19,67 +19,65 @@ from hftbacktest.stats import LinearAssetRecord
 
 @njit
 def pure_pmm_step(
-    hbt,                    # 回测引擎对象
-    stat,                   # 统计记录器
-    half_spread,            # 半价差（tick数）
-    skew,                   # 偏度系数（tick数），每个标准化仓位偏移的tick数
-    interval,               # 策略执行间隔（纳秒）
-    order_qty_dollar,       # 单笔订单金额（美元）
-    max_position_dollar,    # 最大持仓金额（美元）
-    grid_num,               # 网格订单层数
-    grid_interval,          # 网格间隔（价格单位）
+    hbt,                    # Backtest engine object
+    stat,                   # Statistics recorder
+    half_spread,            # Half spread (in ticks)
+    skew,                   # Skew coefficient (in ticks), ticks offset per normalized position
+    interval,               # Strategy execution interval (nanoseconds)
+    order_qty_dollar,       # Order amount in dollars
+    max_position_dollar,    # Maximum position in dollars
+    grid_num,               # Number of grid levels
+    grid_interval,          # Grid interval (price units)
 ):
     """
-    纯PMM做市策略的单步执行版本
+    Pure PMM market making strategy - single step execution version
 
-    返回值：
-    - data_finished: 布尔值，表示数据是否已经用完
+    Returns:
+    - data_finished: Boolean indicating whether data has been exhausted
     """
     asset_no = 0
 
-    # 尝试推进时间
+    # Try to advance time
     if hbt.elapse(interval) != 0:
-        # 数据已经用完
+        # Data exhausted
         return True
 
-    # 获取交易参数
-    tick_size = hbt.depth(0).tick_size    # 最小价格变动单位
-    lot_size = hbt.depth(0).lot_size      # 最小交易数量单位
+    # Get trading parameters
+    tick_size = hbt.depth(0).tick_size    # Minimum price increment
+    lot_size = hbt.depth(0).lot_size      # Minimum trade size
 
     half_spread = half_spread * tick_size
     grid_interval = grid_interval * tick_size
 
-    # 清理过期订单
+    # Clear expired orders
     hbt.clear_inactive_orders(asset_no)
 
-    # 获取当前市场状态
-    depth = hbt.depth(asset_no)        # 订单簿深度数据
-    position = hbt.position(asset_no)   # 当前持仓
-    orders = hbt.orders(asset_no)       # 当前活跃订单
+    # Get current market state
+    depth = hbt.depth(asset_no)        # Order book depth data
+    position = hbt.position(asset_no)   # Current position
+    orders = hbt.orders(asset_no)       # Current active orders
 
-    # 获取最优买卖价
+    # Get best bid/ask prices
     best_bid = depth.best_bid
     best_ask = depth.best_ask
 
     if best_bid <= 0 or best_ask <= 0:
         return False
 
-    # 计算中间价
+    # Calculate mid price
     mid_price = (best_bid + best_ask) / 2.0
 
-    # 根据中间价和订单金额计算订单数量
+    # Calculate order quantity based on mid price and order amount
     order_qty = max(round((order_qty_dollar / mid_price) /
                     lot_size) * lot_size, lot_size)
-    # order_qty = 22
 
-    # 公允价格直接使用中间价（不加OBI调整）
+    # Fair price using mid price
     fair_price = mid_price
 
-    # 计算标准化持仓（以订单数量为单位）
+    # Calculate normalized position (in order quantity units)
     normalized_position = position / order_qty
-    # normalized_position = position
 
-    # 计算保留价格（仅考虑持仓风险的调整）
+    # Calculate reservation price
     reservation_price = fair_price - (skew * tick_size) * normalized_position
 
     bid_price = min(reservation_price - half_spread, best_bid)
@@ -88,31 +86,27 @@ def pure_pmm_step(
     bid_price = np.floor(bid_price / grid_interval) * grid_interval
     ask_price = np.ceil(ask_price / grid_interval) * grid_interval
 
-    # === 更新报价网格 ===
+    # === Update quote grid ===
 
-    # 创建新的买单网格
+    # Create new bid order grid
     new_bid_orders = Dict.empty(np.uint64, np.float64)
-    # 检查仓位限制和价格有效性
+    # Check position limits and price validity
     if position * mid_price < max_position_dollar and np.isfinite(bid_price):
         for i in range(grid_num):
-            # bid_price已经在第82行对齐过了，直接转换为tick整数
             bid_price_tick = int(bid_price / tick_size)
-            # 使用价格tick作为订单ID
             new_bid_orders[uint64(bid_price_tick)] = bid_price
             bid_price -= grid_interval
 
-    # 创建新的卖单网格
+    # Create new ask order grid
     new_ask_orders = Dict.empty(np.uint64, np.float64)
-    # 检查仓位限制和价格有效性
+    # Check position limits and price validity
     if position * mid_price > -max_position_dollar and np.isfinite(ask_price):
         for i in range(grid_num):
-            # ask_price已经在第83行对齐过了，直接转换为tick整数
             ask_price_tick = int(ask_price / tick_size)
-            # 使用价格tick作为订单ID
             new_ask_orders[uint64(ask_price_tick)] = ask_price
             ask_price += grid_interval
 
-    # 撤销不在新网格中的现有订单
+    # Cancel existing orders not in new grid
     order_values = orders.values()
     while order_values.has_next():
         order = order_values.get()
@@ -123,49 +117,45 @@ def pure_pmm_step(
             ):
                 hbt.cancel(asset_no, order.order_id, False)
 
-    # 提交新的买单
+    # Submit new buy orders
     for order_id, order_price in new_bid_orders.items():
-        # 只在该价格位置没有现有订单时提交新订单
         if order_id not in orders:
             hbt.submit_buy_order(asset_no, order_id,
                                  order_price, order_qty, GTX, LIMIT, False)
 
-    # 提交新的卖单
+    # Submit new sell orders
     for order_id, order_price in new_ask_orders.items():
-        # 只在该价格位置没有现有订单时提交新订单
         if order_id not in orders:
             hbt.submit_sell_order(
                 asset_no, order_id, order_price, order_qty, GTX, LIMIT, False)
 
-    # 记录当前状态用于统计分析
+    # Record current state for statistical analysis
     stat.record(hbt)
 
-    return False  # 数据未用完
+    return False
 
 
 @njit
 def pure_pmm(
-    hbt,                    # 回测引擎对象
-    stat,                   # 统计记录器
-    half_spread,            # 半价差（tick数）
-    skew,                   # 偏度系数（tick数），每个标准化仓位偏移的tick数
-    interval,               # 策略执行间隔（纳秒）
-    order_qty_dollar,       # 单笔订单金额（美元）
-    max_position_dollar,    # 最大持仓金额（美元）
-    grid_num,               # 网格订单层数
-    grid_interval,          # 网格间隔（价格单位）
+    hbt,                    # Backtest engine object
+    stat,                   # Statistics recorder
+    half_spread,            # Half spread (in ticks)
+    skew,                   # Skew coefficient (in ticks), ticks offset per normalized position
+    interval,               # Strategy execution interval (nanoseconds)
+    order_qty_dollar,       # Order amount in dollars
+    max_position_dollar,    # Maximum position in dollars
+    grid_num,               # Number of grid levels
+    grid_interval,          # Grid interval (price units)
 ):
     """
-    纯PMM做市策略
+    Pure PMM market making strategy
 
-    核心思想：
-    1. 基于中间价计算基础价格
-    2. 根据持仓风险调整保留价格
-    3. 在保留价格±半价差位置下单做市
+    Core concept:
+    1. Calculate base price based on mid price
+    2. Adjust reservation price based on position risk
+    3. Place market making orders at reservation price ± half spread
     """
-    # 主循环：按指定间隔执行策略
     while True:
-        # 使用单步执行函数
         data_finished = pure_pmm_step(
             hbt=hbt,
             stat=stat,

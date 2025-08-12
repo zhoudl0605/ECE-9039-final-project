@@ -14,8 +14,8 @@ from .pmm_pure import pure_pmm, pure_pmm_step
 
 class PMMRLEnv(EnvBase):
     """
-    基于PMM策略的TorchRL强化学习环境
-    适用于SAC等连续控制算法
+    TorchRL reinforcement learning environment based on PMM strategy
+    Suitable for continuous control algorithms like SAC
     """
 
     def __init__(
@@ -32,25 +32,25 @@ class PMMRLEnv(EnvBase):
         observation_normalization: bool = True,
     ):
         """
-        初始化PMM强化学习环境
+        Initialize PMM reinforcement learning environment
 
         Args:
-            data_asset: hftbacktest数据资产
-            action_low: 动作空间下界 [half_spread, skew, grid_num, grid_interval_multiplier] (必需)
-            action_high: 动作空间上界 [half_spread, skew, grid_num, grid_interval_multiplier] (必需)
-            max_steps: 最大步数
-            step_interval_ns: 每步时间间隔（纳秒）
-            device: 计算设备
-            risk_penalty_weight: 风险惩罚权重
-            transaction_cost_rate: 交易成本率
-            reward_normalization: 是否对奖励进行归一化
-            observation_normalization: 是否对观测进行归一化
+            data_asset: hftbacktest data asset
+            action_low: Action space lower bounds [half_spread, skew, grid_num, grid_interval_multiplier] (required)
+            action_high: Action space upper bounds [half_spread, skew, grid_num, grid_interval_multiplier] (required)
+            max_steps: Maximum number of steps
+            step_interval_ns: Time interval per step (nanoseconds)
+            device: Computing device
+            risk_penalty_weight: Risk penalty weight
+            transaction_cost_rate: Transaction cost rate
+            reward_normalization: Whether to normalize rewards
+            observation_normalization: Whether to normalize observations
 
-        动作空间说明 (4维连续动作):
-            1. half_spread: 半价差（tick数）
-            2. skew: 偏度系数，控制仓位对报价的影响
-            3. grid_num: 网格订单层数
-            4. grid_interval_multiplier: 网格间隔（tick_size的倍数）
+        Action space description (4D continuous actions):
+            1. half_spread: Half spread (in ticks)
+            2. skew: Skew coefficient, controls position impact on quotes
+            3. grid_num: Number of grid order levels
+            4. grid_interval_multiplier: Grid interval (multiples of tick_size)
         """
         super().__init__(device=device)
 
@@ -62,26 +62,26 @@ class PMMRLEnv(EnvBase):
         self.reward_normalization = reward_normalization
         self.observation_normalization = observation_normalization
 
-        # 环境状态
+        # Environment state
         self.current_step = 0
         self.hbt = None
         self.stat = None
         self.recorder = None
         self.data_finished = False
-        self.last_pnl = 0.0  # PnL从0开始
+        self.last_pnl = 0.0  # PnL starts from 0
         self.last_position = 0.0
 
-        # PMM策略参数
+        # PMM strategy parameters
         self.half_spread = 40
-        self.skew = 10  # 现在表示tick数，默认10个tick
-        self.order_qty_dollar = 50.0  # 固定值
+        self.skew = 10  # Now represents tick count, default 10 ticks
+        self.order_qty_dollar = 50.0  # Fixed value
         self.max_position_dollar = 1000.0
         self.grid_num = 10
         self.grid_interval = 0.5
 
-        # 定义动作空间 - 4维连续动作空间
-        # 动作维度：[half_spread, skew, grid_num, grid_interval_multiplier]
-        # grid_interval_multiplier 将被转换为 tick_size 的整数倍
+        # Define action space - 4D continuous action space
+        # Action dimensions: [half_spread, skew, grid_num, grid_interval_multiplier]
+        # grid_interval_multiplier will be converted to integer multiples of tick_size
         self.action_spec = Composite(
             action=Bounded(
                 low=torch.tensor(action_low, device=self.device),
@@ -94,8 +94,8 @@ class PMMRLEnv(EnvBase):
             device=self.device,
         )
 
-        # 定义观测空间 - 4维状态向量
-        # 观测维度：[mid_price, spread, position, balance_ratio]
+        # Define observation space - 4D state vector
+        # Observation dimensions: [mid_price, spread, position, balance_ratio]
         self.observation_spec = Composite(
             observation=Unbounded(
                 shape=torch.Size([4]),
@@ -106,14 +106,14 @@ class PMMRLEnv(EnvBase):
             device=self.device,
         )
 
-        # 奖励规格
+        # Reward specification
         self.reward_spec = Unbounded(
             shape=torch.Size([1]),
             dtype=torch.float32,
             device=self.device,
         )
 
-        # 完成标志规格
+        # Done flag specification
         self.done_spec = Bounded(
             low=0,
             high=1,
@@ -123,18 +123,18 @@ class PMMRLEnv(EnvBase):
         )
 
     def _initialize_backtest(self):
-        """初始化回测环境"""
+        """Initialize backtest environment"""
         self.hbt = HashMapMarketDepthBacktest([self.data_asset])
-        # 注意：HFTBacktest中balance初始值为0，表示余额变化量
-        # 不需要也不能直接设置初始balance
+        # Note: In HFTBacktest, balance initial value is 0, representing balance change
+        # No need and cannot directly set initial balance
 
-        # 初始化统计记录器
+        # Initialize statistics recorder
         from hftbacktest import Recorder
-        self.recorder = Recorder(1, 100_000)  # 记录1个资产，最多100k条记录
+        self.recorder = Recorder(1, 100_000)  # Record 1 asset, max 100k records
         self.stat = self.recorder.recorder
 
     def _get_market_state(self) -> Dict[str, float]:
-        """获取市场状态"""
+        """Get market state"""
         if self.hbt is None:
             return {
                 'mid_price': 0.0,
@@ -150,19 +150,18 @@ class PMMRLEnv(EnvBase):
             best_bid = float(depth.best_bid) if depth.best_bid > 0 else 0.0
             best_ask = float(depth.best_ask) if depth.best_ask > 0 else 0.0
 
-            # 计算中间价和价差
+            # Calculate mid price and spread
             mid_price = (best_bid + best_ask) / \
                 2.0 if best_bid > 0 and best_ask > 0 else 0.0
             spread = (best_ask - best_bid) / \
                 mid_price if mid_price > 0 else 0.0
 
-            # 计算简单波动率 (基于价差比例)
+            # Calculate simple volatility (based on spread ratio)
             volatility = spread if spread > 0 else 0.0
 
-            # 计算订单簿不平衡度（简化版本）
+            # Calculate order book imbalance
             order_book_imbalance = 0.0
             if best_bid > 0 and best_ask > 0:
-                # 这里可以扩展为更复杂的订单簿分析
                 order_book_imbalance = (
                     best_ask - best_bid) / (best_ask + best_bid)
 
@@ -186,7 +185,7 @@ class PMMRLEnv(EnvBase):
             }
 
     def _get_strategy_state(self) -> Dict[str, float]:
-        """获取策略状态"""
+        """Get strategy state"""
         if self.hbt is None:
             return {
                 'position': 0.0,
@@ -209,80 +208,79 @@ class PMMRLEnv(EnvBase):
             }
 
     def _get_observation(self) -> torch.Tensor:
-        """获取环境观测 - 4维版本"""
+        """Get environment observation - 4D version"""
         market_state = self._get_market_state()
         strategy_state = self._get_strategy_state()
 
-        # 直接使用原始值，无需标准化
-        # 组合观测向量（4维）
+        # Use raw values directly, no normalization needed
+        # Combine observation vector (4D)
         obs = torch.tensor([
-            market_state['mid_price'],        # 中间价（美元）
-            # 价差（美元）
+            market_state['mid_price'],        # Mid price (USD)
+            # Spread (USD)
             market_state['best_ask'] -
             market_state['best_bid'] if market_state['best_bid'] > 0 else 0,
-            strategy_state['position'],       # 仓位（币数量）
-            strategy_state['pnl'],            # PnL（美元）
+            strategy_state['position'],       # Position (coin quantity)
+            strategy_state['pnl'],            # PnL (USD)
         ], dtype=torch.float32, device=self.device)
 
-        # 观测标准化
+        # Observation normalization
         if self.observation_normalization:
             obs = self._normalize_observation(obs)
 
         return obs
 
     def _calculate_reward(self, action: torch.Tensor) -> float:
-        """计算奖励函数"""
+        """Calculate reward function"""
         strategy_state = self._get_strategy_state()
 
-        # PnL奖励（已包含负费率返佣）
+        # PnL reward (already includes negative fee rebate)
         current_pnl = strategy_state['pnl']
         pnl_change = current_pnl - self.last_pnl
-        # 直接使用PnL变化作为奖励（以美元为单位）
-        pnl_reward = pnl_change  # 赚1美元奖励1，亏1美元奖励-1
+        # Use PnL change directly as reward (in USD)
+        pnl_reward = pnl_change  # Earn $1 reward 1, lose $1 reward -1
 
-        # 风险惩罚（基于仓位价值）
+        # Risk penalty (based on position value)
         position = strategy_state['position']
-        # 仓位价值 ≈ 仓位数量 * 当前价格
+        # Position value ≈ position quantity * current price
         market_state = self._get_market_state()
         position_value = abs(
             position * market_state['mid_price']) if market_state['mid_price'] > 0 else 0
-        # 风险惩罚：仓位价值超过1000美元开始惩罚
+        # Risk penalty: penalty starts when position value exceeds $1000
         risk_penalty = self.risk_penalty_weight * \
             (position_value / 1000.0) ** 2
 
-        # 负费率环境下没有交易成本，返佣已包含在PnL中
-        # transaction_cost = 0 (移除)
+        # Negative fee environment: rebate already included in PnL
 
-        # 综合奖励
+        # Total reward
         total_reward = pnl_reward - risk_penalty
 
-        # 奖励标准化
+        # Reward normalization
         if self.reward_normalization:
             total_reward = self._normalize_reward(total_reward)
 
         return total_reward
 
     def _reset(self, tensordict: Optional[TensorDictBase] = None, **kwargs) -> TensorDictBase:
-        """重置环境"""
+        """Reset environment"""
         self.current_step = 0
         self.data_finished = False
-        self.last_pnl = 0.0  # PnL从0开始
+        self.last_pnl = 0.0  # PnL starts from 0
         self.last_position = 0.0
 
-        # 重新初始化回测环境
+        # Reinitialize backtest environment
         self._initialize_backtest()
 
-        # 重置PMM策略参数为默认值
+        # Reset PMM strategy parameters to defaults
         self.half_spread = 40
-        self.skew = 10  # tick数
+        self.skew = 10  # tick count
         self.order_qty_dollar = 50.0
         self.grid_num = 10
         self.grid_interval = 0.5
 
-        # 获取初始观测
+        # Get initial observation
         observation = self._get_observation()
 
-        # 初始化完成标志
+        # Initialize done flag
         done = torch.tensor([False], dtype=torch.bool, device=self.device)
 
         return TensorDict(
@@ -295,21 +293,20 @@ class PMMRLEnv(EnvBase):
         )
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
-        """执行一步"""
+        """Execute one step"""
         action = tensordict["action"]
 
-        # 解析动作（4个参数）
+        # Parse action (4 parameters)
         self.half_spread = int(action[0].item())
         self.skew = action[1].item()
         self.grid_num = int(action[2].item())
 
-        # grid_interval 必须是 tick_size 的整数倍
-        # 将连续值转换为tick_size的倍数
+        # Convert grid_interval to integer multiples of tick_size
         tick_size = self.hbt.depth(0).tick_size if self.hbt else 0.01
         grid_interval_ticks = max(1, int(action[3].item() / tick_size))
         self.grid_interval = grid_interval_ticks * tick_size
 
-        # 执行策略步骤
+        # Execute strategy step
         if self.hbt is not None:
             try:
                 self.data_finished = pure_pmm_step(
@@ -328,23 +325,23 @@ class PMMRLEnv(EnvBase):
 
         self.current_step += 1
 
-        # 计算奖励
+        # Calculate reward
         reward = self._calculate_reward(action)
 
-        # 更新历史状态
+        # Update historical state
         strategy_state = self._get_strategy_state()
         self.last_pnl = strategy_state['pnl']
         self.last_position = strategy_state['position']
 
-        # 获取新的观测
+        # Get new observation
         next_observation = self._get_observation()
 
-        # 检查是否结束
+        # Check if done
         done = (
-            self.data_finished or  # 数据用完
+            self.data_finished or  # Data exhausted
             self.current_step >= self.max_steps or
-            # PnL损失超过阈值时停止
-            strategy_state['pnl'] <= -500.0  # 损失500美元（更合理的阈值）
+            # Stop when PnL loss exceeds threshold
+            strategy_state['pnl'] <= -500.0  # Loss of $500 (more reasonable threshold)
         )
 
         return TensorDict(
@@ -358,23 +355,21 @@ class PMMRLEnv(EnvBase):
         )
 
     def _normalize_observation(self, obs: torch.Tensor) -> torch.Tensor:
-        """观测处理"""
-        # 不做标准化，直接返回原始值
+        """Observation processing"""
         return obs
 
     def _normalize_reward(self, reward: float) -> float:
-        """奖励处理"""
-        # 不做裁剪，直接返回原始奖励
+        """Reward processing"""
         return reward
 
     def _set_seed(self, seed: Optional[int] = None):
-        """设置随机种子"""
+        """Set random seed"""
         if seed is not None:
             torch.manual_seed(seed)
             np.random.seed(seed)
 
     def close(self, *, raise_if_closed: bool = True):
-        """关闭环境"""
+        """Close environment"""
         if self.hbt is not None:
             try:
                 if hasattr(self.hbt, 'close'):
@@ -396,20 +391,20 @@ def create_pmm_env(
     **kwargs
 ) -> PMMRLEnv:
     """
-    创建PMM强化学习环境的便捷函数
+    Convenience function to create PMM reinforcement learning environment
 
     Args:
-        data_asset: hftbacktest数据资产
-        action_low: 动作空间下界 (必需)
-        action_high: 动作空间上界 (必需)
-        max_steps: 最大步数
-        device: 计算设备
-        **kwargs: 其他环境参数
+        data_asset: hftbacktest data asset
+        action_low: Action space lower bounds (required)
+        action_high: Action space upper bounds (required)
+        max_steps: Maximum number of steps
+        device: Computing device
+        **kwargs: Other environment parameters
 
     Returns:
-        PMMRLEnv: 配置好的环境实例
+        PMMRLEnv: Configured environment instance
 
-    示例:
+    Example:
         action_low = [1.0, 0.0001, 1.0, 1.0]     # [half_spread, skew, grid_num, grid_interval_multiplier]
         action_high = [50.0, 0.001, 10.0, 50.0]
 

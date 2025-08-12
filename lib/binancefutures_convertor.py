@@ -72,7 +72,6 @@ def convert(
                 continue
                 
             try:
-                # Parse timestamp and JSON message - 确保使用正确的数据类型
                 local_timestamp = np.int64(line[:timestamp_slice])
                 message = json.loads(line[timestamp_slice + 1:])
                 
@@ -83,8 +82,8 @@ def convert(
                     continue
                 
                 event_type = data.get('e', '')
-                # Binance的E和T字段是毫秒时间戳，转换为纳秒需要乘以1_000_000
-                exch_timestamp = np.int64(data.get('E', 0)) * np.int64(1_000_000)  # Convert milliseconds to nanoseconds
+                # Binance timestamps are in milliseconds, convert to nanoseconds
+                exch_timestamp = np.int64(data.get('E', 0)) * np.int64(1_000_000)
                 
                 # Handle depth updates
                 if event_type == 'depthUpdate':
@@ -136,8 +135,7 @@ def convert(
                     price = float(data.get('p', '0'))
                     quantity = float(data.get('q', '0'))
                     is_buyer_maker = data.get('m', False)
-                    # Binance的T字段是毫秒时间戳，转换为纳秒需要乘以1_000_000
-                    trade_time = np.int64(data.get('T', 0)) * np.int64(1_000_000)  # Convert milliseconds to nanoseconds
+                    trade_time = np.int64(data.get('T', 0)) * np.int64(1_000_000)
                     
                     # Determine side: if buyer is maker, then it's a sell trade (taker sold)
                     # if seller is maker, then it's a buy trade (taker bought)
@@ -157,17 +155,13 @@ def convert(
                 
                 # Handle book ticker (best bid/ask updates)
                 elif event_type == 'bookTicker':
-                    # We can optionally process bookTicker events as depth updates
-                    # But for now, we'll skip them to avoid duplicate data
-                    pass
+                    pass  # Skip to avoid duplicate data
                     
             except (json.JSONDecodeError, ValueError, KeyError, OverflowError) as e:
-                # Skip invalid lines, including overflow errors
                 print(f"Skipping invalid line: {e}")
                 continue
                 
-            # Check if buffer is getting full
-            if row_num >= buffer_size - 1000:  # Leave some buffer space
+            if row_num >= buffer_size - 1000:  # Buffer nearly full
                 print(f"Warning: Buffer nearly full at {row_num}/{buffer_size}. Consider increasing buffer_size.")
                 break
                 
@@ -176,11 +170,10 @@ def convert(
         import traceback
         traceback.print_exc()
     finally:
-        # Clean up subprocess
         process.wait()
         if process.returncode != 0 and process.stderr:
             stderr_output = process.stderr.read()
-            if stderr_output.strip():  # Only print if there's actual error content
+            if stderr_output.strip():
                 print(f"gunzip command failed: {stderr_output}")
 
     tmp = tmp[:row_num]
